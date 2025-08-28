@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import boto3
 from typing import Dict, List, Optional, Any
 import re
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
 
