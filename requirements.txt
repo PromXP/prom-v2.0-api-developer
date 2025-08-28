@@ -35,4 +35,5 @@ websockets==10.4
 setuptools==68.2.2
 wheel==0.41.2
 python-dotenv==1.0.1
+fhir.resources==7.1.0
 
