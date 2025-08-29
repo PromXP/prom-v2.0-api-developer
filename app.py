@@ -824,6 +824,7 @@ async def reset_questionnaires(data: QuestionnaireResetRequest):
         "reset_period": data.period
     }
 
+
 #GET FUNCTIONS
 @app.get("/patient/{uhid}/photo")
 async def get_patient_photo(uhid: str):
@@ -1015,6 +1016,7 @@ async def get_all_patients_by_admin_uhid(admin_uhid: str):
 
             if patient_uhid:
                 matched_uhids.append(patient_uhid)
+                patient_uhid = None  # Reset for next bundle
 
         if not matched_uhids:
             raise HTTPException(
@@ -1570,6 +1572,154 @@ def parse_practitioner_bundle(bundle: dict) -> dict:
 
 
 
+#PATCH FUNCTIONS
+@app.patch("/patients/add-followup")
+async def add_followup(comment_data: FollowUpComment):
+    uhid = comment_data.uhid
+    comment_text = comment_data.comment
+
+    # Find the patient's Observation for activation_status or relevant target
+    patient_bundle = await patient_medical.find_one({"entry.resource.id": uhid})
+    if not patient_bundle:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # Create Provenance resource
+    provenance = {
+        "fullUrl": f"urn:uuid:{str(uuid.uuid4())}",
+        "resource": {
+            "resourceType": "Provenance",
+            "id": str(uuid.uuid4()),
+            "target": [
+                {
+                    "reference": f"urn:uuid:{str(uuid.uuid4())}"
+                }
+            ],
+            "recorded": datetime.utcnow().isoformat() + "Z",
+            "activity": {
+                "text": "Patient Follow-up Comment"
+            },
+            "agent": [
+                {
+                    "type": {"text": "Practitioner"},
+                    "who": {"reference": f"urn:uuid:{str(uuid.uuid4())}"}  # can change to actual practitioner
+                }
+            ],
+            "text": {
+                "status": "generated",
+                "div": f"<div xmlns='http://www.w3.org/1999/xhtml'>Follow-up Comment: {comment_text}</div>"
+            }
+        }
+    }
+
+    # Append Provenance to the bundle
+    await patient_medical.update_one(
+        {"entry.resource.id": uhid},
+        {"$push": {"entry": provenance}}
+    )
+
+    return {"status": "success", "message": "Follow-up comment added"}
+
+
+#DELETE FUNCTIONS
+@app.delete("/delete-questionnaires")
+async def delete_questionnaires(data: DeleteQuestionnaireRequest):
+    # Select collection based on side
+    if data.side == "left":
+        collection = medical_left
+    elif data.side == "right":
+        collection = medical_right
+    else:
+        raise HTTPException(status_code=400, detail="side must be 'left' or 'right'")
+
+    # Find bundle for this patient
+    bundle = await collection.find_one({
+        "entry.resource.resourceType": "Patient",
+        "entry.resource.text.div": {"$regex": f"Patient ID: {data.patient_id}", "$options": "i"}
+    })
+
+    if not bundle:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    updated_entries = []
+    deleted_count = 0
+
+    for entry in bundle.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") == "Observation":
+            div_text = resource.get("text", {}).get("div", "")
+            # Check if period string is inside the div
+            if data.period in div_text:
+                deleted_count += 1
+                continue  # Skip adding this entry (delete it)
+        updated_entries.append(entry)
+
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail="No questionnaires matched for this period")
+
+    # Update DB with remaining entries
+    await collection.update_one(
+        {"_id": bundle["_id"]},
+        {"$set": {"entry": updated_entries}}
+    )
+
+    return {"message": f"Deleted {deleted_count} questionnaires for period '{data.period}'"}
+
+
+#HELPER ENDPOINTS
+@app.post("/patients/full")
+async def create_full_patient(data: PatientFull):
+    # ===== BASE SECTION =====
+    patient = data.base
+    existing_patient = await patient_base.find_one({"id": patient.uhid})
+    if existing_patient:
+        raise HTTPException(status_code=400, detail="Patient already exists in patient_base")
+
+    existing_user = await users_collection.find_one({"uhid": patient.uhid})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="UHID already exists in Users collection")
+
+    fhir_data = convert_patientbase_to_fhir(patient)
+    await patient_base.insert_one(fhir_data)
+
+    user_doc = {
+        "uhid": patient.uhid,
+        "email": "",  
+        "phone": "",  
+        "type": "patient",
+        "created_at": datetime.utcnow().isoformat(),
+        "password": patient.password
+    }
+    await users_collection.insert_one(user_doc)
+
+    # ===== CONTACT SECTION =====
+    contact = data.contact
+    existing_email = await users_collection.find_one({"email": contact.email, "uhid": {"$ne": contact.uhid}})
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already exists for another user")
+
+    existing_phone = await users_collection.find_one({"phone": contact.phone_number, "uhid": {"$ne": contact.uhid}})
+    if existing_phone:
+        raise HTTPException(status_code=400, detail="Phone number already exists for another user")
+
+    fhir_bundle_contact = convert_to_patientcontact_fhir_bundle(contact)
+    await patient_contact.insert_one(fhir_bundle_contact)
+
+    await users_collection.update_one(
+        {"uhid": contact.uhid},
+        {"$set": {"email": contact.email, "phone": contact.phone_number}}
+    )
+
+    # ===== MEDICAL SECTION =====
+    medical = data.medical
+    fhir_bundle_medical = convert_patientmedical_to_fhir(medical)
+    await patient_medical.insert_one(fhir_bundle_medical)
+
+    # ===== RESPONSE =====
+    return {
+        "message": "Patient fully created with base, contact, and medical details",
+        "uhid": patient.uhid
+    }
+
 @app.get("/get_admin_patient_reminder_page/{patient_uhid}")
 async def get_admin_patient_reminder_page(patient_uhid: str):
     try:
@@ -1852,7 +2002,6 @@ async def get_admin_patient_activation_page(patient_uhid: str):
                 },
             )
 
-
 @app.get("/get_admin_doctor_page")
 async def get_admin_doctor_page():
     try:
@@ -2114,153 +2263,6 @@ async def get_doctor_name(uhid: str):
     return {"uhid": uhid, "name": doctor_name}
 
 
-#PATCH FUNCTIONS
-@app.patch("/patients/add-followup")
-async def add_followup(comment_data: FollowUpComment):
-    uhid = comment_data.uhid
-    comment_text = comment_data.comment
-
-    # Find the patient's Observation for activation_status or relevant target
-    patient_bundle = await patient_medical.find_one({"entry.resource.id": uhid})
-    if not patient_bundle:
-        raise HTTPException(status_code=404, detail="Patient not found")
-
-    # Create Provenance resource
-    provenance = {
-        "fullUrl": f"urn:uuid:{str(uuid.uuid4())}",
-        "resource": {
-            "resourceType": "Provenance",
-            "id": str(uuid.uuid4()),
-            "target": [
-                {
-                    "reference": f"urn:uuid:{str(uuid.uuid4())}"
-                }
-            ],
-            "recorded": datetime.utcnow().isoformat() + "Z",
-            "activity": {
-                "text": "Patient Follow-up Comment"
-            },
-            "agent": [
-                {
-                    "type": {"text": "Practitioner"},
-                    "who": {"reference": f"urn:uuid:{str(uuid.uuid4())}"}  # can change to actual practitioner
-                }
-            ],
-            "text": {
-                "status": "generated",
-                "div": f"<div xmlns='http://www.w3.org/1999/xhtml'>Follow-up Comment: {comment_text}</div>"
-            }
-        }
-    }
-
-    # Append Provenance to the bundle
-    await patient_medical.update_one(
-        {"entry.resource.id": uhid},
-        {"$push": {"entry": provenance}}
-    )
-
-    return {"status": "success", "message": "Follow-up comment added"}
-
-
-#DELETE FUNCTIONS
-@app.delete("/delete-questionnaires")
-async def delete_questionnaires(data: DeleteQuestionnaireRequest):
-    # Select collection based on side
-    if data.side == "left":
-        collection = medical_left
-    elif data.side == "right":
-        collection = medical_right
-    else:
-        raise HTTPException(status_code=400, detail="side must be 'left' or 'right'")
-
-    # Find bundle for this patient
-    bundle = await collection.find_one({
-        "entry.resource.resourceType": "Patient",
-        "entry.resource.text.div": {"$regex": f"Patient ID: {data.patient_id}", "$options": "i"}
-    })
-
-    if not bundle:
-        raise HTTPException(status_code=404, detail="Patient not found")
-
-    updated_entries = []
-    deleted_count = 0
-
-    for entry in bundle.get("entry", []):
-        resource = entry.get("resource", {})
-        if resource.get("resourceType") == "Observation":
-            div_text = resource.get("text", {}).get("div", "")
-            # Check if period string is inside the div
-            if data.period in div_text:
-                deleted_count += 1
-                continue  # Skip adding this entry (delete it)
-        updated_entries.append(entry)
-
-    if deleted_count == 0:
-        raise HTTPException(status_code=404, detail="No questionnaires matched for this period")
-
-    # Update DB with remaining entries
-    await collection.update_one(
-        {"_id": bundle["_id"]},
-        {"$set": {"entry": updated_entries}}
-    )
-
-    return {"message": f"Deleted {deleted_count} questionnaires for period '{data.period}'"}
-
-
-#HELPER ENDPOINTS
-@app.post("/patients/full")
-async def create_full_patient(data: PatientFull):
-    # ===== BASE SECTION =====
-    patient = data.base
-    existing_patient = await patient_base.find_one({"id": patient.uhid})
-    if existing_patient:
-        raise HTTPException(status_code=400, detail="Patient already exists in patient_base")
-
-    existing_user = await users_collection.find_one({"uhid": patient.uhid})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="UHID already exists in Users collection")
-
-    fhir_data = convert_patientbase_to_fhir(patient)
-    await patient_base.insert_one(fhir_data)
-
-    user_doc = {
-        "uhid": patient.uhid,
-        "email": "",  
-        "phone": "",  
-        "type": "patient",
-        "created_at": datetime.utcnow().isoformat(),
-        "password": patient.password
-    }
-    await users_collection.insert_one(user_doc)
-
-    # ===== CONTACT SECTION =====
-    contact = data.contact
-    existing_email = await users_collection.find_one({"email": contact.email, "uhid": {"$ne": contact.uhid}})
-    if existing_email:
-        raise HTTPException(status_code=400, detail="Email already exists for another user")
-
-    existing_phone = await users_collection.find_one({"phone": contact.phone_number, "uhid": {"$ne": contact.uhid}})
-    if existing_phone:
-        raise HTTPException(status_code=400, detail="Phone number already exists for another user")
-
-    fhir_bundle_contact = convert_to_patientcontact_fhir_bundle(contact)
-    await patient_contact.insert_one(fhir_bundle_contact)
-
-    await users_collection.update_one(
-        {"uhid": contact.uhid},
-        {"$set": {"email": contact.email, "phone": contact.phone_number}}
-    )
-
-    # ===== MEDICAL SECTION =====
-    medical = data.medical
-    fhir_bundle_medical = convert_patientmedical_to_fhir(medical)
-    await patient_medical.insert_one(fhir_bundle_medical)
-
-    # ===== RESPONSE =====
-    return {
-        "message": "Patient fully created with base, contact, and medical details",
-        "uhid": patient.uhid
-    }
 
 
 
