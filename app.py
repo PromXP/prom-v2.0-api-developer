@@ -836,6 +836,12 @@ async def reset_single_questionnaire(data: SingleQuestionnaireResetRequest):
     else:
         raise HTTPException(status_code=400, detail="side must be 'left' or 'right'")
 
+    # Parse start_date from request
+    try:
+        start_date_obj = datetime.strptime(data.start_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start_date must be in YYYY-MM-DD format")
+
     # Find bundle for this patient
     bundle = await collection.find_one({
         "entry.resource.resourceType": "Patient",
@@ -870,10 +876,10 @@ async def reset_single_questionnaire(data: SingleQuestionnaireResetRequest):
                     if comp.get("code", {}).get("text") == "Completion Status":
                         comp["valueBoolean"] = False
 
+            # Reset effectivePeriod using start_date and 14 days later
             if "effectivePeriod" in resource:
-                today = datetime.utcnow()
-                resource["effectivePeriod"]["start"] = today.strftime("%Y-%m-%d")
-                resource["effectivePeriod"]["end"] = (today + timedelta(days=14)).strftime("%Y-%m-%d")
+                resource["effectivePeriod"]["start"] = start_date_obj.strftime("%Y-%m-%d")
+                resource["effectivePeriod"]["end"] = (start_date_obj + timedelta(days=14)).strftime("%Y-%m-%d")
 
             # Reset text.div → erase trailing score/recorded time
             if "text" in resource and "div" in resource["text"]:
@@ -909,7 +915,9 @@ async def reset_single_questionnaire(data: SingleQuestionnaireResetRequest):
         "status": "success",
         "modified_count": result.modified_count,
         "reset_questionnaire": data.questionnaire,
-        "reset_period": data.period
+        "reset_period": data.period,
+        "start_date": data.start_date,
+        "end_date": (start_date_obj + timedelta(days=14)).strftime("%Y-%m-%d")
     }
 
 #GET FUNCTIONS

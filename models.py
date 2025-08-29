@@ -240,6 +240,7 @@ class SingleQuestionnaireResetRequest(BaseModel):
     side: str          # "left" or "right"
     questionnaire: str # exact questionnaire name to reset
     period: str        # period to match, e.g., "6W", "Pre Op"
+    start_date: str
 
 class DeleteQuestionnaireRequest(BaseModel):
     patient_id: str
