@@ -416,7 +416,7 @@ async def update_patient(uhid: str, updates: Dict[str, str]):
 
         # --- Step 1: Check UHID conflict ---
         if "uhid" in updates:
-            new_uhid = updates["uhid"]
+            new_uhid = uhid
             for name, coll in collections.items():
                 conflict = await coll.find_one({
                     "$or": [
@@ -691,7 +691,7 @@ async def update_patient(uhid: str, updates: Dict[str, str]):
         if user_doc:
             await users_collection.update_one(
                 {"_id": user_doc["_id"]},
-                {"$set": {"uhid": new_uhid}}
+                {"$set": {"uhid": uhid}}
             )
 
         if not updated:
