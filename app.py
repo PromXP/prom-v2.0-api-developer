@@ -1395,9 +1395,9 @@ def parse_patient_bundle(bundle,side="Left"):
             # ---------- PROM Scores (Medical_Left / Medical_Right) ----------
             elif code_text in [
                 "Oxford Knee Score (OKS)",
-                "12-Item Short Form Survey (SF-12)",
+                "Short Form - 12 (SF-12)",
                 "Forgotten Joint Score (FJS)",
-                "Knee injury and Osteoarthritis Outcome Score, JR (KOOS JR)",
+                "Knee injury and Osteoarthritis Outcome Score, Joint Replacement (KOOS JR)",
                 "Knee Society Score (KSS)"
             ]:
                 phase = None
