@@ -1863,7 +1863,7 @@ async def get_admin_patient_reminder_page(patient_uhid: str):
         }
 
         return {
-            "patient": patient,
+            "patient": clean_patient,
         }
 
     except Exception as e:
