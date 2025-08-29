@@ -3,8 +3,8 @@ from fastapi import  BackgroundTasks, Body, FastAPI, HTTPException, WebSocket, W
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from db import admin_lobby, build_admin_fhir_bundle, convert_patientbase_to_fhir, convert_patientmedical_to_fhir, convert_to_patientcontact_fhir_bundle,doctor_lobby, feedback_to_fhir_bundle, generate_fhir_bundle, generate_fhir_doctor_bundle, get_collection, post_surgery_to_fhir_bundle, users_collection,patient_base ,patient_contact ,patient_medical,patient_surgery_details,feedback,medical_left,medical_right
-from models import Admin, Doctor, Feedback, PatientBase, PatientContact, PatientMedical, PostSurgeryDetail, QuestionnaireAssignment, QuestionnaireScore, QuestionnaireResetRequest, DeleteQuestionnaireRequest, LoginRequest, ResetPasswordRequest,FollowUpComment,PatientFull
-from datetime import datetime, timezone
+from models import Admin, Doctor, Feedback, PatientBase, PatientContact, PatientMedical, PostSurgeryDetail, QuestionnaireAssignment, QuestionnaireScore, QuestionnaireResetRequest, DeleteQuestionnaireRequest, LoginRequest, ResetPasswordRequest,FollowUpComment,PatientFull, SingleQuestionnaireResetRequest
+from datetime import datetime, timezone, timedelta
 import boto3
 from typing import Dict, List, Optional, Any
 import re
@@ -787,9 +787,11 @@ async def reset_questionnaires(data: QuestionnaireResetRequest):
                     if comp.get("code", {}).get("text") == "Completion Status":
                         comp["valueBoolean"] = False
 
-            # Reset end date
-            if "effectivePeriod" in resource:
-                resource["effectivePeriod"]["end"] = datetime.utcnow().strftime("%Y-%m-%d")
+                if "effectivePeriod" in resource:
+                    today = datetime.utcnow()
+                    resource["effectivePeriod"]["start"] = today.strftime("%Y-%m-%d")
+                    resource["effectivePeriod"]["end"] = (today + timedelta(days=14)).strftime("%Y-%m-%d")
+
 
             # Reset text.div → erase only trailing score/recorded time
             if "text" in resource and "div" in resource["text"]:
@@ -820,10 +822,95 @@ async def reset_questionnaires(data: QuestionnaireResetRequest):
 
     return {
         "status": "success",
-        "modified_count": result.modified_count,
+        "modified_count": len(updated_entries) - 1,
         "reset_period": data.period
     }
 
+@app.put("/reset_single_questionnaire")
+async def reset_single_questionnaire(data: SingleQuestionnaireResetRequest):
+    # Select collection based on side
+    if data.side.lower() == "left":
+        collection = medical_left
+    elif data.side.lower() == "right":
+        collection = medical_right
+    else:
+        raise HTTPException(status_code=400, detail="side must be 'left' or 'right'")
+
+    # Find bundle for this patient
+    bundle = await collection.find_one({
+        "entry.resource.resourceType": "Patient",
+        "entry.resource.text.div": {"$regex": f"Patient ID: {data.patient_id}", "$options": "i"}
+    })
+
+    if not bundle:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    updated_entries = []
+    questionnaire_found = False
+
+    for entry in bundle.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") == "Observation":
+            # Match questionnaire name and period
+            if data.questionnaire.lower() not in resource.get("code", {}).get("text", "").lower():
+                updated_entries.append(entry)
+                continue
+            if data.period not in resource.get("valueString", ""):
+                updated_entries.append(entry)
+                continue
+
+            questionnaire_found = True
+
+            # Reset valueString
+            resource["valueString"] = f"Scores ({data.period})"
+
+            # Reset Completion Status component
+            if "component" in resource:
+                for comp in resource["component"]:
+                    if comp.get("code", {}).get("text") == "Completion Status":
+                        comp["valueBoolean"] = False
+
+            if "effectivePeriod" in resource:
+                today = datetime.utcnow()
+                resource["effectivePeriod"]["start"] = today.strftime("%Y-%m-%d")
+                resource["effectivePeriod"]["end"] = (today + timedelta(days=14)).strftime("%Y-%m-%d")
+
+            # Reset text.div → erase trailing score/recorded time
+            if "text" in resource and "div" in resource["text"]:
+                resource["text"]["div"] = re.sub(
+                    r"(<p>)(.*?)(</p>)",
+                    lambda m: m.group(1)
+                    + re.sub(
+                        r"\s*(?:,?\s*Completed:)?\s*\d*\s*(?:at\s*[0-9T:\-\.Z\+]+)?\s*$",
+                        "",
+                        m.group(2),
+                        flags=re.IGNORECASE,
+                    )
+                    + m.group(3),
+                    resource["text"]["div"],
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+
+            # Reset notes → keep 4 empty items
+            resource["note"] = [{"text": ""}, {"text": ""}, {"text": ""}, {"text": ""}]
+
+        updated_entries.append(entry)
+
+    if not questionnaire_found:
+        raise HTTPException(status_code=404, detail="Questionnaire not found for this patient and period")
+
+    # Save back to DB
+    result = await collection.update_one(
+        {"_id": bundle["_id"]},
+        {"$set": {"entry": updated_entries}}
+    )
+
+    return {
+        "status": "success",
+        "modified_count": result.modified_count,
+        "reset_questionnaire": data.questionnaire,
+        "reset_period": data.period
+    }
 
 #GET FUNCTIONS
 @app.get("/patient/{uhid}/photo")
