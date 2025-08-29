@@ -1162,6 +1162,7 @@ def parse_patient_bundle(bundle,side="Left"):
         "Practitioners": {},
         "Appointments": [],
         "VIP_Status": None,
+        "Activation_Status": None,
         "Medical": {
             "blood_group": None,
             "height": None,
@@ -1278,6 +1279,10 @@ def parse_patient_bundle(bundle,side="Left"):
                 val = res.get("valueQuantity", {}).get("value")
                 unit = res.get("valueQuantity", {}).get("unit")
                 parsed["Medical"]["weight"] = f"{val} {unit}" if val and unit else None
+            
+            elif code_text == "Activation Status":
+                val = res.get("valueBoolean", "")
+                parsed["Activation_Status"] = f"{val}" if val else False
 
             # Check for Activation Status observations
             # elif code_text == "Activation Status":
@@ -1426,7 +1431,7 @@ def parse_patient_bundle(bundle,side="Left"):
 
 def merge_clean_patient(patient: dict) -> dict:
     merged = {"uhid": patient.get("uhid"), "Patient": {}, "Practitioners": {}, "Appointments": [],
-              "VIP_Status": None, "Medical": {}, "Medical_Left": {}, "Medical_Right": {}}
+              "VIP_Status": None,"Activation_Status": None, "Medical": {}, "Medical_Left": {}, "Medical_Right": {}}
 
     for coll in patient.get("collections", {}).values():
         # Merge Patient info
@@ -1447,6 +1452,9 @@ def merge_clean_patient(patient: dict) -> dict:
         # VIP_Status: take first non-None
         if merged["VIP_Status"] is None and coll.get("VIP_Status") is not None:
             merged["VIP_Status"] = coll["VIP_Status"]
+
+        if merged["Activation_Status"] is None and coll.get("Activation_Status") is not None:
+            merged["Activation_Status"] = coll["Activation_Status"]
 
         # Merge Medical
         for key, val in coll.get("Medical", {}).items():
