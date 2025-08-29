@@ -1366,10 +1366,19 @@ def parse_patient_bundle(bundle,side="Left"):
                     ).replace("</div>", "").replace("Comment:", "").strip()
                 
                 # Determine activation_status from comment
-                activation_status = "activation" in comment_text.lower()
-                
-                # Remove "Activation - " prefix if present
-                comment_text = comment_text.replace("Activation -", "").strip()
+                if comment_text.lower().startswith("activation"):
+                    activation_status = True
+                elif comment_text.lower().startswith("deactivation"):
+                    activation_status = False
+                else:
+                    activation_status = None  # fallback if not clearly activation/deactivation
+
+                # Clean up prefixes
+                comment_text = (
+                    comment_text.replace("Activation -", "")
+                    .replace("Deactivation -", "")
+                    .strip()
+                )
                 
                 parsed["Medical"].setdefault("activation_records", []).append({
                     "activation_status": activation_status,
