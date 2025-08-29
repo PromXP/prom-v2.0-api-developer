@@ -1451,10 +1451,19 @@ def merge_clean_patient(patient: dict) -> dict:
                     if rec.get("recorded") not in existing_timestamps:
                         merged["Medical"]["activation_records"].append(rec)
                         existing_timestamps.add(rec.get("recorded"))
-            else:
-                # Keep all lists, and non-empty dicts/values
-                if isinstance(val, list) or val not in [None, {}, ""]:
-                    merged["Medical"][key] = val
+
+        
+        for key, val in coll.get("Medical", {}).items():
+            if key == "follow_up_records":
+                    if "follow_up_records" not in merged["Medical"]:
+                        merged["Medical"]["follow_up_records"] = []
+                    existing_timestamps = {rec["recorded"] for rec in merged["Medical"]["follow_up_records"]}
+                    for rec in val:
+                        if rec.get("recorded") not in existing_timestamps:
+                            merged["Medical"]["follow_up_records"].append(rec)
+                            existing_timestamps.add(rec.get("recorded"))
+
+            
 
         # Merge Medical_Left PROM scores
         for prom, phases in coll.get("Medical_Left", {}).items():
@@ -1854,7 +1863,7 @@ async def get_admin_patient_reminder_page(patient_uhid: str):
         }
 
         return {
-            "patient": clean_patient,
+            "patient": patient,
         }
 
     except Exception as e:
