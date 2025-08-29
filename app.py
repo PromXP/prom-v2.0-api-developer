@@ -1842,6 +1842,8 @@ async def get_admin_patient_reminder_page(patient_uhid: str):
         clean_patient = {
             "uhid": patient.get("uhid"),
             "Patient": {
+                "name":patient.get("Patient", {}).get("name"),
+                "uhid":patient.get("Patient", {}).get("uhid"),
                 "phone": patient.get("Patient", {}).get("phone"),
                 "email": patient.get("Patient", {}).get("email"),
             },
