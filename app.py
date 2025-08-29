@@ -2292,6 +2292,43 @@ async def get_doctor_name(uhid: str):
 
     return {"uhid": uhid, "name": doctor_name}
 
+@app.get("/getadminname/{uhid}")
+async def get_admin_name(uhid: str):
+    # find doctor bundle containing given UHID
+    doc = await admin_lobby.find_one({
+        "entry.resource.identifier": {
+            "$elemMatch": {
+                "system": "http://hospital.org/uhid",
+                "value": uhid
+            }
+        }
+    })
+
+    if not doc:
+        return {"uhid": uhid, "name": "NA", "email": "NA"}
+
+    # loop through entries to find Practitioner resource
+    admin_name = "NA"
+    admin_email = "NA"
+
+    for entry in doc.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") == "Practitioner":
+            # ✅ extract name
+            names = resource.get("name", [])
+            if names and "text" in names[0]:
+                admin_name = names[0]["text"]
+
+            # ✅ extract email from telecom
+            for telecom in resource.get("telecom", []):
+                if telecom.get("system") == "email":
+                    admin_email = telecom.get("value")
+                    break
+
+            break  # found Practitioner, exit loop
+
+    return {"uhid": uhid, "name": admin_name, "email": admin_email}
+
 
 
 
