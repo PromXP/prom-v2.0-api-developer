@@ -2014,6 +2014,7 @@ async def get_admin_patient_activation_page(patient_uhid: str):
         # Keep only the needed fields
         clean_patient = {
             "uhid": patient.get("uhid"),
+            "activation_status":patient.get("Activation_Status",""),
             "activation_records": patient.get("Medical", {}).get("activation_records", [])
         }
 
