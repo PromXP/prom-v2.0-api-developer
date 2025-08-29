@@ -1068,11 +1068,12 @@ async def get_all_patients_by_admin_uhid(admin_uhid: str):
 
             all_patients_data.append(merge_clean_patient(patient_data))
 
-            for patient in all_patients_data:
-                # Left side
+        for patient in all_patients_data:
+                # ---- Left side ----
                 left = patient.get("Medical_Left", {})
                 total_left = 0
                 completed_left = 0
+                
                 for prom_scores in left.values():
                     for phase_data in prom_scores.values():
                         total_left += 1
@@ -1082,8 +1083,10 @@ async def get_all_patients_by_admin_uhid(admin_uhid: str):
                     patient["Medical_Left_Completion"] = round((completed_left / total_left) * 100, 2)
                 else:
                     patient["Medical_Left_Completion"] = "NA"
+                
+                patient.pop("Medical_Left", None)
 
-                # Right side
+                # ---- Right side ----
                 right = patient.get("Medical_Right", {})
                 total_right = 0
                 completed_right = 0
@@ -1096,43 +1099,42 @@ async def get_all_patients_by_admin_uhid(admin_uhid: str):
                     patient["Medical_Right_Completion"] = round((completed_right / total_right) * 100, 2)
                 else:
                     patient["Medical_Right_Completion"] = "NA"
-
-                # Optionally remove detailed left/right scores if you only want percentage
-                patient.pop("Medical_Left", None)
+                    
                 patient.pop("Medical_Right", None)
 
-                # ---------------- Compute OP status ----------------
-            today = datetime.utcnow().date()
 
-            def compute_phases(surgery_date_str):
-                if not surgery_date_str:
-                    return "NA"
-                try:
-                    surgery_date = datetime.strptime(surgery_date_str, "%Y-%m-%d").date()
-                except:
-                    return "NA"
+            
+                today = datetime.utcnow().date()
 
-                if surgery_date > today:
-                    return "Pre Op"
+                def compute_phases(surgery_date_str):
+                    if not surgery_date_str:
+                        return "NA"
+                    try:
+                        surgery_date = datetime.strptime(surgery_date_str, "%Y-%m-%d").date()
+                    except:
+                        return "NA"
 
-                delta_days = (today - surgery_date).days
-                phases = []
-                if delta_days >= 42:
-                    phases.append("6W")
-                if delta_days >= 90:
-                    phases.append("3M")
-                if delta_days >= 180:
-                    phases.append("6M")
-                if delta_days >= 365:
-                    phases.append("1Y")
-                if delta_days >= 730:
-                    phases.append("2Y")
-                return phases or ["+6W"]
+                    if surgery_date > today:
+                        return "Pre Op"
 
-            surgery_left = patient.get("Medical", {}).pop("surgery_date_left", None)
-            surgery_right = patient.get("Medical", {}).pop("surgery_date_right", None)
-            patient["Patient_Status_Left"] = compute_phases(surgery_left)
-            patient["Patient_Status_Right"] = compute_phases(surgery_right)
+                    delta_days = (today - surgery_date).days
+                    phases = []
+                    if delta_days >= 42:
+                        phases.append("6W")
+                    if delta_days >= 90:
+                        phases.append("3M")
+                    if delta_days >= 180:
+                        phases.append("6M")
+                    if delta_days >= 365:
+                        phases.append("1Y")
+                    if delta_days >= 730:
+                        phases.append("2Y")
+                    return phases or ["+6W"]
+
+                surgery_left = patient.get("Medical", {}).pop("surgery_date_left", None)
+                surgery_right = patient.get("Medical", {}).pop("surgery_date_right", None)
+                patient["Patient_Status_Left"] = compute_phases(surgery_left)
+                patient["Patient_Status_Right"] = compute_phases(surgery_right)
 
 
         return {
