@@ -1729,6 +1729,7 @@ async def get_admin_patient_reminder_page(patient_uhid: str):
                 "patient_medical": patient_medical,
                 "medical_left": medical_left,
                 "medical_right": medical_right,
+                "patient_base": patient_base
             }
         patient_data = {"uhid": patient_uhid, "collections": {}}
 
