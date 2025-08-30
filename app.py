@@ -1041,6 +1041,7 @@ async def get_patient_by_uhid(patient_uhid: str):
                         total_left += 1
                         if phase_data.get("completed"):
                             completed_left += 1
+            
             pending_left = total_left - completed_left
             patient["Medical_Left_Completion"] = round((completed_left / total_left) * 100, 2) if total_left else "NA"
             patient["Medical_Left_Completed_Count"] = completed_left
@@ -1056,6 +1057,7 @@ async def get_patient_by_uhid(patient_uhid: str):
                         total_right += 1
                         if phase_data.get("completed"):
                             completed_right += 1
+            
             pending_right = total_right - completed_right
             patient["Medical_Right_Completion"] = round((completed_right / total_right) * 100, 2) if total_right else "NA"
             patient["Medical_Right_Completed_Count"] = completed_right
@@ -1165,73 +1167,82 @@ async def get_all_patients_by_admin_uhid(admin_uhid: str):
 
             all_patients_data.append(merge_clean_patient(patient_data))
 
+        today = datetime.utcnow().date()
+
+        def compute_current_status(surgery_date_str):
+            if not surgery_date_str:
+                return "NA"
+            try:
+                surgery_date = datetime.strptime(surgery_date_str, "%Y-%m-%d").date()
+            except:
+                return "NA"
+
+            if surgery_date > today:
+                return "Pre Op"
+
+            delta_days = (today - surgery_date).days
+            if delta_days < 42:
+                return "6W"
+            elif delta_days < 90:
+                return "6W"
+            elif delta_days < 180:
+                return "3M"
+            elif delta_days < 365:
+                return "6M"
+            elif delta_days < 730:
+                return "1Y"
+            else:
+                return "2Y"
+
+        # Define the standard order of phases
+        phase_order = ["Pre Op", "6W", "3M", "6M", "1Y", "2Y"]
+
         for patient in all_patients_data:
-                # ---- Left side ----
-                left = patient.get("Medical_Left", {})
-                total_left = 0
-                completed_left = 0
-                
-                for prom_scores in left.values():
-                    for phase_data in prom_scores.values():
+            # ---------------- Compute patient status ----------------
+            surgery_left = patient.get("Medical", {}).get("surgery_date_left", None)
+            surgery_right = patient.get("Medical", {}).get("surgery_date_right", None)
+
+            status_left = compute_current_status(surgery_left)
+            status_right = compute_current_status(surgery_right)
+
+            patient["Patient_Status_Left"] = status_left
+            patient["Patient_Status_Right"] = status_right
+
+            # Get allowed phases up to current status
+            allowed_left_phases = phase_order[: phase_order.index(status_left) + 1] if status_left in phase_order else []
+            allowed_right_phases = phase_order[: phase_order.index(status_right) + 1] if status_right in phase_order else []
+
+            # ---------------- Compute left completion ----------------
+            left = patient.get("Medical_Left", {})
+            total_left = 0
+            completed_left = 0
+            for prom_scores in left.values():
+                for phase, phase_data in prom_scores.items():
+                    if phase in allowed_left_phases:
                         total_left += 1
                         if phase_data.get("completed"):
                             completed_left += 1
-                if total_left:
-                    patient["Medical_Left_Completion"] = round((completed_left / total_left) * 100, 2)
-                else:
-                    patient["Medical_Left_Completion"] = "NA"
-                
-                patient.pop("Medical_Left", None)
+            
+            pending_left = total_left - completed_left
+            patient["Medical_Left_Completion"] = round((completed_left / total_left) * 100, 2) if total_left else "NA"
+            patient["Medical_Left_Completed_Count"] = completed_left
+            patient["Medical_Left_Pending_Count"] = pending_left
 
-                # ---- Right side ----
-                right = patient.get("Medical_Right", {})
-                total_right = 0
-                completed_right = 0
-                for prom_scores in right.values():
-                    for phase_data in prom_scores.values():
+            # ---------------- Compute right completion ----------------
+            right = patient.get("Medical_Right", {})
+            total_right = 0
+            completed_right = 0
+            for prom_scores in right.values():
+                for phase, phase_data in prom_scores.items():
+                    if phase in allowed_right_phases:
                         total_right += 1
                         if phase_data.get("completed"):
                             completed_right += 1
-                if total_right:
-                    patient["Medical_Right_Completion"] = round((completed_right / total_right) * 100, 2)
-                else:
-                    patient["Medical_Right_Completion"] = "NA"
-                    
-                patient.pop("Medical_Right", None)
-
-
             
-                today = datetime.utcnow().date()
-
-                def compute_phases(surgery_date_str):
-                    if not surgery_date_str:
-                        return "NA"
-                    try:
-                        surgery_date = datetime.strptime(surgery_date_str, "%Y-%m-%d").date()
-                    except:
-                        return "NA"
-
-                    if surgery_date > today:
-                        return "Pre Op"
-
-                    delta_days = (today - surgery_date).days
-                    phases = []
-                    if delta_days >= 42:
-                        phases.append("6W")
-                    if delta_days >= 90:
-                        phases.append("3M")
-                    if delta_days >= 180:
-                        phases.append("6M")
-                    if delta_days >= 365:
-                        phases.append("1Y")
-                    if delta_days >= 730:
-                        phases.append("2Y")
-                    return phases or ["+6W"]
-
-                surgery_left = patient.get("Medical", {}).pop("surgery_date_left", None)
-                surgery_right = patient.get("Medical", {}).pop("surgery_date_right", None)
-                patient["Patient_Status_Left"] = compute_phases(surgery_left)
-                patient["Patient_Status_Right"] = compute_phases(surgery_right)
+            pending_right = total_right - completed_right
+            patient["Medical_Right_Completion"] = round((completed_right / total_right) * 100, 2) if total_right else "NA"
+            patient["Medical_Right_Completed_Count"] = completed_right
+            patient["Medical_Right_Pending_Count"] = pending_right
 
 
         return {
@@ -1249,11 +1260,6 @@ async def get_all_patients_by_admin_uhid(admin_uhid: str):
             },
         )
 
-# def strip_div(xhtml: str) -> str:
-#     if not xhtml:
-#         return None
-#     # remove <div ...> ... </div>
-#     return re.sub(r"<[^>]+>", "", xhtml).strip()
 
 def parse_patient_bundle(bundle,side="Left"):
     parsed = {
@@ -2271,39 +2277,9 @@ async def get_admin_doctor_page():
                         # ---- Merge clean structure ----
                 patient = merge_clean_patient(patient_data)
 
-                # ---- Compute completion % ----
-                if uhid.get("leg_left") == "Assigned":
-                    left = patient.get("Medical_Left", {})
-                    total_left, completed_left = 0, 0
-                    for prom_scores in left.values():
-                        for phase_data in prom_scores.values():
-                            total_left += 1
-                            if phase_data.get("completed"):
-                                completed_left += 1
-                    patient["Medical_Left_Completion"] = (
-                        round((completed_left / total_left) * 100, 2) if total_left else "NA"
-                    )
-
-                if uhid.get("leg_right") == "Assigned":
-                    right = patient.get("Medical_Right", {})
-                    total_right, completed_right = 0, 0
-                    for prom_scores in right.values():
-                        for phase_data in prom_scores.values():
-                            total_right += 1
-                            if phase_data.get("completed"):
-                                completed_right += 1
-                    patient["Medical_Right_Completion"] = (
-                        round((completed_right / total_right) * 100, 2) if total_right else "NA"
-                    )
-
-                # ---- Remove raw details if only % needed ----
-                patient.pop("Medical_Left", None)
-                patient.pop("Medical_Right", None)
-
-                # ---- Compute OP phases ----
                 today = datetime.utcnow().date()
 
-                def compute_phases(surgery_date_str):
+                def compute_current_status(surgery_date_str):
                     if not surgery_date_str:
                         return "NA"
                     try:
@@ -2315,22 +2291,71 @@ async def get_admin_doctor_page():
                         return "Pre Op"
 
                     delta_days = (today - surgery_date).days
-                    phases = []
-                    if delta_days >= 42: phases.append("6W")
-                    if delta_days >= 90: phases.append("3M")
-                    if delta_days >= 180: phases.append("6M")
-                    if delta_days >= 365: phases.append("1Y")
-                    if delta_days >= 730: phases.append("2Y")
-                    return phases or ["+6W"]
+                    if delta_days < 42:
+                        return "6W"
+                    elif delta_days < 90:
+                        return "6W"
+                    elif delta_days < 180:
+                        return "3M"
+                    elif delta_days < 365:
+                        return "6M"
+                    elif delta_days < 730:
+                        return "1Y"
+                    else:
+                        return "2Y"
+
+                # Define the standard order of phases
+                phase_order = ["Pre Op", "6W", "3M", "6M", "1Y", "2Y"]
 
                 surgery_left = patient.get("Medical", {}).pop("surgery_date_left", None)
                 surgery_right = patient.get("Medical", {}).pop("surgery_date_right", None)
+                
+                status_left = compute_current_status(surgery_left)
+                status_right = compute_current_status(surgery_right)
 
                 if uhid.get("leg_left") == "Assigned":
-                    patient["Patient_Status_Left"] = compute_phases(surgery_left)
+                    patient["Patient_Status_Left"] = status_left
                 if uhid.get("leg_right") == "Assigned":
-                    patient["Patient_Status_Right"] = compute_phases(surgery_right)
+                    patient["Patient_Status_Right"] = status_right
 
+                # Get allowed phases up to current status
+                allowed_left_phases = phase_order[: phase_order.index(status_left) + 1] if status_left in phase_order else []
+                allowed_right_phases = phase_order[: phase_order.index(status_right) + 1] if status_right in phase_order else []
+
+
+                # ---- Compute completion % ----
+                if uhid.get("leg_left") == "Assigned":                
+                    left = patient.get("Medical_Left", {})
+                    total_left, completed_left = 0, 0
+                    for prom_scores in left.values():
+                        for phase, phase_data in prom_scores.items():
+                            if phase in allowed_left_phases:
+                                total_left += 1
+                                if phase_data.get("completed"):
+                                    completed_left += 1
+                    patient["Medical_Left_Completion"] = (
+                        round((completed_left / total_left) * 100, 2) if total_left else "NA"
+                    )
+
+                if uhid.get("leg_right") == "Assigned":
+                    right = patient.get("Medical_Right", {})
+                    total_right, completed_right = 0, 0
+                    for prom_scores in right.values():
+                        for phase, phase_data in prom_scores.items():
+                            if phase in allowed_right_phases:
+                                total_right += 1
+                                if phase_data.get("completed"):
+                                    completed_right += 1
+                    patient["Medical_Right_Completion"] = (
+                        round((completed_right / total_right) * 100, 2) if total_right else "NA"
+                    )
+
+                # ---- Remove raw details if only % needed ----
+                patient.pop("Medical_Left", None)
+                patient.pop("Medical_Right", None)
+
+
+                
                 # ---- Finally append ----
                 all_patients_data.append(patient)
 
