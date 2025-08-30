@@ -986,78 +986,80 @@ async def get_patient_by_uhid(patient_uhid: str):
 
         all_patients_data.append(merge_clean_patient(patient_data))
 
+        today = datetime.utcnow().date()
+
+        def compute_current_status(surgery_date_str):
+            if not surgery_date_str:
+                return "NA"
+            try:
+                surgery_date = datetime.strptime(surgery_date_str, "%Y-%m-%d").date()
+            except:
+                return "NA"
+
+            if surgery_date > today:
+                return "Pre Op"
+
+            delta_days = (today - surgery_date).days
+            if delta_days < 42:
+                return "6W"
+            elif delta_days < 90:
+                return "6W"
+            elif delta_days < 180:
+                return "3M"
+            elif delta_days < 365:
+                return "6M"
+            elif delta_days < 730:
+                return "1Y"
+            else:
+                return "2Y"
+
+        # Define the standard order of phases
+        phase_order = ["Pre Op", "6W", "3M", "6M", "1Y", "2Y"]
+
         for patient in all_patients_data:
-            # Left side
+            # ---------------- Compute patient status ----------------
+            surgery_left = patient.get("Medical", {}).get("surgery_date_left", None)
+            surgery_right = patient.get("Medical", {}).get("surgery_date_right", None)
+
+            status_left = compute_current_status(surgery_left)
+            status_right = compute_current_status(surgery_right)
+
+            patient["Patient_Status_Left"] = status_left
+            patient["Patient_Status_Right"] = status_right
+
+            # Get allowed phases up to current status
+            allowed_left_phases = phase_order[: phase_order.index(status_left) + 1] if status_left in phase_order else []
+            allowed_right_phases = phase_order[: phase_order.index(status_right) + 1] if status_right in phase_order else []
+
+            # ---------------- Compute left completion ----------------
             left = patient.get("Medical_Left", {})
             total_left = 0
             completed_left = 0
             for prom_scores in left.values():
-                for phase_data in prom_scores.values():
-                    total_left += 1
-                    if phase_data.get("completed"):
-                        completed_left += 1
+                for phase, phase_data in prom_scores.items():
+                    if phase in allowed_left_phases:
+                        total_left += 1
+                        if phase_data.get("completed"):
+                            completed_left += 1
             pending_left = total_left - completed_left
-
-            if total_left:
-                patient["Medical_Left_Completion"] = round((completed_left / total_left) * 100, 2)
-            else:
-                patient["Medical_Left_Completion"] = "NA"
-
+            patient["Medical_Left_Completion"] = round((completed_left / total_left) * 100, 2) if total_left else "NA"
             patient["Medical_Left_Completed_Count"] = completed_left
             patient["Medical_Left_Pending_Count"] = pending_left
 
-            # Right side
+            # ---------------- Compute right completion ----------------
             right = patient.get("Medical_Right", {})
             total_right = 0
             completed_right = 0
             for prom_scores in right.values():
-                for phase_data in prom_scores.values():
-                    total_right += 1
-                    if phase_data.get("completed"):
-                        completed_right += 1
+                for phase, phase_data in prom_scores.items():
+                    if phase in allowed_right_phases:
+                        total_right += 1
+                        if phase_data.get("completed"):
+                            completed_right += 1
             pending_right = total_right - completed_right
-
-            if total_right:
-                patient["Medical_Right_Completion"] = round((completed_right / total_right) * 100, 2)
-            else:
-                patient["Medical_Right_Completion"] = "NA"
-
+            patient["Medical_Right_Completion"] = round((completed_right / total_right) * 100, 2) if total_right else "NA"
             patient["Medical_Right_Completed_Count"] = completed_right
             patient["Medical_Right_Pending_Count"] = pending_right
-
-
-                    # ---------------- Compute OP status ----------------
-        today = datetime.utcnow().date()
-
-        def compute_phases(surgery_date_str):
-                    if not surgery_date_str:
-                        return "NA"
-                    try:
-                        surgery_date = datetime.strptime(surgery_date_str, "%Y-%m-%d").date()
-                    except:
-                        return "NA"
-
-                    if surgery_date > today:
-                        return "Pre Op"
-
-                    delta_days = (today - surgery_date).days
-                    phases = []
-                    if delta_days >= 42:
-                        phases.append("6W")
-                    if delta_days >= 90:
-                        phases.append("3M")
-                    if delta_days >= 180:
-                        phases.append("6M")
-                    if delta_days >= 365:
-                        phases.append("1Y")
-                    if delta_days >= 730:
-                        phases.append("2Y")
-                    return phases or ["+6W"]
-
-        surgery_left = patient.get("Medical", {}).get("surgery_date_left", None)
-        surgery_right = patient.get("Medical", {}).get("surgery_date_right", None)
-        patient["Patient_Status_Left"] = compute_phases(surgery_left)
-        patient["Patient_Status_Right"] = compute_phases(surgery_right)
 
         return {
                     "patient": all_patients_data[0]
@@ -1405,7 +1407,7 @@ def parse_patient_bundle(bundle,side="Left"):
                 "Oxford Knee Score (OKS)",
                 "Short Form - 12 (SF-12)",
                 "Forgotten Joint Score (FJS)",
-                "Knee injury and Osteoarthritis Outcome Score, Joint Replacement (KOOS JR)",
+                "Knee Injury and Osteoarthritis Outcome Score, Joint Replacement (KOOS, JR)",
                 "Knee Society Score (KSS)"
             ]:
                 phase = None
@@ -1419,7 +1421,7 @@ def parse_patient_bundle(bundle,side="Left"):
                 notes = [n.get("text") for n in res.get("note", []) if n.get("text")]
 
                 if val and "Pre Op" in val:
-                    phase = "Pre_Op"
+                    phase = "Pre Op"
                 elif val and "6W" in val:
                     phase = "6W"
                 elif val and "3M" in val:
