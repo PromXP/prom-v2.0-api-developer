@@ -1956,13 +1956,23 @@ async def get_admin_patient_reminder_page(patient_uhid: str):
 
         patient = all_patients_data[0]
 
-        def filter_pending_questionnaires(medical_side: dict):
+        # Standard order of phases
+        phase_order = ["Pre Op", "6W", "3M", "6M", "1Y", "2Y"]
+
+        # Compute allowed phases for each side based on current status
+        status_left = patient.get("Patient_Status_Left")
+        status_right = patient.get("Patient_Status_Right")
+
+        allowed_left_phases = phase_order[: phase_order.index(status_left) + 1] if status_left in phase_order else []
+        allowed_right_phases = phase_order[: phase_order.index(status_right) + 1] if status_right in phase_order else []
+
+        def filter_pending_questionnaires(medical_side: dict, allowed_phases: list):
             pending = {}
             for questionnaire, phases in medical_side.items():
                 pending_phases = {
                     phase: data
                     for phase, data in phases.items()
-                    if not data.get("completed", False)  # ✅ keep only pending
+                    if phase in allowed_phases and not data.get("completed", False)  # ✅ only pending and within allowed phases
                 }
                 if pending_phases:
                     pending[questionnaire] = pending_phases
@@ -1972,13 +1982,13 @@ async def get_admin_patient_reminder_page(patient_uhid: str):
         clean_patient = {
             "uhid": patient.get("uhid"),
             "Patient": {
-                "name":patient.get("Patient", {}).get("name"),
-                "uhid":patient.get("Patient", {}).get("uhid"),
+                "name": patient.get("Patient", {}).get("name"),
+                "uhid": patient.get("Patient", {}).get("uhid"),
                 "phone": patient.get("Patient", {}).get("phone"),
                 "email": patient.get("Patient", {}).get("email"),
             },
-            "Medical_Left": filter_pending_questionnaires(patient.get("Medical_Left", {})),
-            "Medical_Right": filter_pending_questionnaires(patient.get("Medical_Right", {})),
+            "Medical_Left": filter_pending_questionnaires(patient.get("Medical_Left", {}), allowed_left_phases),
+            "Medical_Right": filter_pending_questionnaires(patient.get("Medical_Right", {}), allowed_right_phases),
             "follow_up_records": patient.get("Medical", {}).get("follow_up_records", [])
         }
 
