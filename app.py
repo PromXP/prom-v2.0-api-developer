@@ -1060,7 +1060,7 @@ async def get_patient_by_uhid(patient_uhid: str):
         patient["Patient_Status_Right"] = compute_phases(surgery_right)
 
         return {
-                    "patient": all_patients_data[0],
+                    "patient": all_patients_data[0]
                 }
 
     except Exception as e:
@@ -1554,28 +1554,32 @@ def merge_clean_patient(patient: dict) -> dict:
             merged["Activation_Status"] = coll["Activation_Status"]
 
         # Merge Medical
+                # Merge Medical
         for key, val in coll.get("Medical", {}).items():
             if key == "activation_records":
-                # Initialize merged list if not present
                 if "activation_records" not in merged["Medical"]:
                     merged["Medical"]["activation_records"] = []
-                # Add records without duplicates based on 'recorded'
                 existing_timestamps = {rec["recorded"] for rec in merged["Medical"]["activation_records"]}
                 for rec in val:
                     if rec.get("recorded") not in existing_timestamps:
                         merged["Medical"]["activation_records"].append(rec)
                         existing_timestamps.add(rec.get("recorded"))
 
-        
-        for key, val in coll.get("Medical", {}).items():
-            if key == "follow_up_records":
-                    if "follow_up_records" not in merged["Medical"]:
-                        merged["Medical"]["follow_up_records"] = []
-                    existing_timestamps = {rec["recorded"] for rec in merged["Medical"]["follow_up_records"]}
-                    for rec in val:
-                        if rec.get("recorded") not in existing_timestamps:
-                            merged["Medical"]["follow_up_records"].append(rec)
-                            existing_timestamps.add(rec.get("recorded"))
+            elif key == "follow_up_records":
+                if "follow_up_records" not in merged["Medical"]:
+                    merged["Medical"]["follow_up_records"] = []
+                existing_timestamps = {rec["recorded"] for rec in merged["Medical"]["follow_up_records"]}
+                for rec in val:
+                    if rec.get("recorded") not in existing_timestamps:
+                        merged["Medical"]["follow_up_records"].append(rec)
+                        existing_timestamps.add(rec.get("recorded"))
+
+            else:
+                # For other medical fields (blood_group, height, weight, etc.)
+                if val not in [None, "", {}]:
+                    merged["Medical"][key] = val
+
+                            
 
             
 
